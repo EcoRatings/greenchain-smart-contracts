@@ -1,5 +1,3 @@
-# GreenChain Smart Contracts
-
 <p align="center">
   <img src="https://docs.optimism.io/_next/image?url=%2Fimg%2Fbuilders%2Fchain-operators%2Fsequencer-diagram.png&w=828&q=75" alt="Optimism Sequencer Diagram">
 </p>
