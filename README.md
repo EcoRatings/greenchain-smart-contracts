@@ -253,14 +253,14 @@ Production Deployment Differences (Planned):
 | Royalty change required | Adjust via per-token overrides for new mints; cannot mutate frozen tokens |
 
 ---
-## 21. Future Extensions (Roadmap – Informational Only)
+## 20. Future Extensions (Roadmap – Informational Only)
 - On-chain registry anchor contract for original serial + signature attestation.
 - Cross-chain bridge representation (ERC5164 / canonical bridge) for credits.
 - Merkle-based batch retirement proofs aggregated off-chain.
 - Verifiable metadata hashing (content-addressed JSON) with multi-hash standard.
 
 ---
-## 22. Repository Structure
+## 21. Repository Structure
 ```
 ./CarbonCredit1155.sol   (ERC1155 multi-batch carbon credits)
 ./CarbonCreditSBT.sol    (Soulbound ERC721 carbon certificate)
@@ -269,12 +269,10 @@ Production Deployment Differences (Planned):
 (Add test, scripts, and deployment directories before formal audit.)
 
 ---
-## 23. Contact & Disclosure
-Primary technical contact: TBD (will supply email / PGP before audit).  
-Security disclosures: security@ecoratings.example (placeholder).  
-Public bug bounty policy: Planned (not yet live).  
+## 22. Contact & Disclosure
+Primary technical contact: info@ecoratings.ai  
 
 ---
-## 24. License
+## 23. License
 All contracts: MIT (see SPDX identifiers in source headers). Ensure third-party dependencies comply.
 
