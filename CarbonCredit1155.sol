@@ -6,12 +6,12 @@ import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
 import "@openzeppelin/contracts/token/common/ERC2981.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
-/// @title CarbonCredit1155Slim
+/// @title CarbonCredit1155
 /// @notice Gas-optimized ERC-1155 carbon credits.
 ///         1 token = 1 tCO2e. Expiry-enforced transfers. Optional royalties.
 ///         Rich metadata is kept off-chain (IPFS/Arweave) and anchored by metadataHash.
 ///         Uniqueness enforced via hashed registry serial.
-contract CarbonCredit1155Slim is ERC1155, ERC1155Supply, ERC2981, AccessControl {
+contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
     // -------------------- Roles --------------------
     bytes32 public constant MINTER_ROLE       = keccak256("MINTER_ROLE");
     bytes32 public constant RETIRER_ROLE      = keccak256("RETIRER_ROLE");
