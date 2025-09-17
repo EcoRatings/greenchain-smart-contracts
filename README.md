@@ -1,3 +1,7 @@
+# GreenChain Smart Contracts
+
+![Optimism Sequencer Diagram](https://docs.optimism.io/_next/image?url=%2Fimg%2Fbuilders%2Fchain-operators%2Fsequencer-diagram.png&w=828&q=75)
+
 ## 1. High-Level Overview
 GreenChain is an Optimism SDK (OP Stack) based L2 Ethereum chain focused on transparent tokenization and retirement of carbon credits. Two on-chain token standards are provided:
 
@@ -270,7 +274,7 @@ Production Deployment Differences (Planned):
 
 ---
 ## 22. Contact & Disclosure
-Primary technical contact: info@ecoratings.ai  
+Primary technical contact: ajay@ecoratings.ai  
 
 ---
 ## 23. License
