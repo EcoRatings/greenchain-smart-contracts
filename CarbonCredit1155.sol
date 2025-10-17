@@ -98,6 +98,11 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         return keccak256(b);
     }
 
+    /// @dev Returns true if this id has ever been issued (minted at least once).
+    function _everIssued(uint256 id) internal view returns (bool) {
+        return issuedSupply[id] > 0;
+    }
+
     // -------------------- Minting --------------------
     /// @dev 1 token = 1 tCO2e. Use `amount` as tonnes minted.
     /// @param to Receiver of the minted credits
@@ -222,16 +227,19 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         return super.uri(id);
     }
 
+    /// @notice Returns true if the credit has an expiry and the current time is past it.
+    /// @dev Uses _everIssued so fully retired (totalSupply==0) ids are still queryable.
     function isExpired(uint256 id) public view returns (bool) {
-        require(exists(id), "Nonexistent id");
+        require(_everIssued(id), "Unknown id");
         uint64 vu = validUntil[id];
         return vu != 0 && block.timestamp > vu;
     }
 
     /// @notice On-chain status derived from supply and expiry.
     /// "Expired" takes precedence over supply-based statuses.
+    /// @dev Uses _everIssued so FullyRetired status is available when totalSupply==0.
     function statusOf(uint256 id) external view returns (string memory) {
-        require(exists(id), "Nonexistent id");
+        require(_everIssued(id), "Unknown id");
         if (isExpired(id)) return "Expired";
         uint256 issued = issuedSupply[id];
         uint256 retired_ = retiredSupply[id];
@@ -246,7 +254,7 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         view
         returns (uint16 _vintageYear, uint64 _validUntil, bytes32 _metadataHash, string memory _uri)
     {
-        require(exists(id), "Nonexistent id");
+        require(_everIssued(id), "Unknown id");
         return (vintageYear[id], validUntil[id], metadataHash[id], uri(id));
     }
 
