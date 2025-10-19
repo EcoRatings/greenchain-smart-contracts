@@ -54,7 +54,8 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         uint256 amount,
         uint16 vintageYear,
         bytes32 registrySerialHash,
-        string tokenURI
+        string tokenURI,
+        bytes32 contentHash
     );
 
     event CarbonBatchURISet(uint256 indexed id, string uri);
@@ -120,6 +121,7 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         uint16 _vintageYear,
         string calldata registrySerialNumber,
         string calldata tokenURI_,
+        bytes32 contentHash,
         address royaltyReceiver,
         uint96 royaltyBps,
         uint64 validUntil_,
@@ -130,6 +132,10 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         require(bytes(registrySerialNumber).length > 0, "Empty registry serial");
         require(royaltyBps <= _feeDenominator(), "royalty too high");
 
+        if (validUntil_ != 0) {
+            require(validUntil_ > block.timestamp, "validUntil_ must be in the future");
+        }
+
         bytes32 sk = _serialKey(registrySerialNumber);
         require(!registrySerialUsed[sk], "Registry serial already used");
         registrySerialUsed[sk] = true;
@@ -139,8 +145,9 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
 
         // Optional per-token URI and content hash (content hash of full JSON recommended)
         if (bytes(tokenURI_).length > 0) {
+            require(contentHash != bytes32(0), "content hash required");
             _tokenURIs[id] = tokenURI_;
-            metadataHash[id] = keccak256(bytes(tokenURI_));
+            metadataHash[id] = contentHash;
             emit CarbonBatchURISet(id, tokenURI_);
         }
 
@@ -156,15 +163,17 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         issuedSupply[id] += amount;
         _mint(to, id, amount, data);
 
-        emit CarbonBatchMinted(id, to, amount, _vintageYear, sk, tokenURI_);
+        emit CarbonBatchMinted(id, to, amount, _vintageYear, sk, tokenURI_, metadataHash[id]);
     }
 
     // -------------------- Metadata controls --------------------
-    function setURI(uint256 id, string calldata newuri) external onlyRole(URI_MANAGER_ROLE) {
+    function setURI(uint256 id, string calldata newuri, bytes32 contentHash) external onlyRole(URI_MANAGER_ROLE) {
         require(exists(id), "Nonexistent id");
         require(!metadataFrozen[id], "Metadata frozen");
+        require(bytes(newuri).length > 0, "Empty URI");
+        require(contentHash != bytes32(0), "content hash required");
         _tokenURIs[id] = newuri;
-        metadataHash[id] = keccak256(bytes(newuri));
+        metadataHash[id] = contentHash;
         emit CarbonBatchURISet(id, newuri);
     }
 
@@ -178,6 +187,10 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
     /// @notice Extend validity (cannot shorten). Governance-controlled.
     function extendValidity(uint256 id, uint64 newValidUntil) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(exists(id), "Nonexistent id");
+        // Optional extra safety: do not allow setting a past timestamp
+        if (newValidUntil != 0) {
+            require(newValidUntil > block.timestamp, "newValidUntil must be in the future");
+        }
         require(newValidUntil >= validUntil[id], "Cannot shorten validity");
         validUntil[id] = newValidUntil;
         emit ValiditySet(id, newValidUntil);

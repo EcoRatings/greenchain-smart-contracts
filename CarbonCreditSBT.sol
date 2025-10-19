@@ -43,7 +43,8 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         address indexed to,
         uint16 vintageYear,
         bytes32 registrySerialHash,
-        string tokenURI
+        string tokenURI,
+        bytes32 contentHash
     );
     event CarbonCertificateURISet(uint256 indexed id, string uri);
     event MetadataFrozen(uint256 indexed id, bytes32 contentHash);
@@ -98,6 +99,7 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         uint16 _vintageYear,
         string calldata registrySerialNumber,
         string calldata tokenURI_,
+        bytes32 contentHash,
         address royaltyReceiver,
         uint96 royaltyBps,
         uint64 validUntil_
@@ -120,8 +122,9 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         emit ValiditySet(tokenId, validUntil_);
 
         if (bytes(tokenURI_).length > 0) {
+            require(contentHash != bytes32(0), "content hash required");
             _tokenURIs[tokenId] = tokenURI_;
-            metadataHash[tokenId] = keccak256(bytes(tokenURI_));
+            metadataHash[tokenId] = contentHash; // keccak256(bytes(JSON)) off-chain provided
             emit CarbonCertificateURISet(tokenId, tokenURI_);
         }
 
@@ -132,15 +135,17 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         // Soulbound: emit EIP-5192 Locked on mint
         emit Locked(tokenId);
 
-        emit CarbonCertificateMinted(tokenId, to, _vintageYear, sk, tokenURI_);
+        emit CarbonCertificateMinted(tokenId, to, _vintageYear, sk, tokenURI_, metadataHash[tokenId]);
     }
 
     // -------------------- Metadata controls --------------------
-    function setURI(uint256 tokenId, string calldata newuri) external onlyRole(URI_MANAGER_ROLE) {
+    function setURI(uint256 tokenId, string calldata newuri, bytes32 contentHash) external onlyRole(URI_MANAGER_ROLE) {
         _requireOwned(tokenId);
         require(!metadataFrozen[tokenId], "Metadata frozen");
+        require(bytes(newuri).length > 0, "Empty URI");
+        require(contentHash != bytes32(0), "content hash required");
         _tokenURIs[tokenId] = newuri;
-        metadataHash[tokenId] = keccak256(bytes(newuri));
+        metadataHash[tokenId] = contentHash;
         emit CarbonCertificateURISet(tokenId, newuri);
     }
 
