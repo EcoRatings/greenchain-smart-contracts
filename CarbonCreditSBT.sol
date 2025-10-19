@@ -124,7 +124,7 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         if (bytes(tokenURI_).length > 0) {
             require(contentHash != bytes32(0), "content hash required");
             _tokenURIs[tokenId] = tokenURI_;
-            metadataHash[tokenId] = contentHash; // keccak256(bytes(JSON)) off-chain provided
+            metadataHash[tokenId] = contentHash;
             emit CarbonCertificateURISet(tokenId, tokenURI_);
         }
 
