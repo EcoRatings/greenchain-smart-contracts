@@ -133,7 +133,7 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         require(royaltyBps <= _feeDenominator(), "royalty too high");
 
         if (validUntil_ != 0) {
-            require(validUntil_ > block.timestamp, "validUntil_ must be in the future");
+            require(validUntil_ > block.timestamp, "validUntil must be future");
         }
 
         bytes32 sk = _serialKey(registrySerialNumber);
@@ -189,7 +189,7 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         require(exists(id), "Nonexistent id");
         // Optional extra safety: do not allow setting a past timestamp
         if (newValidUntil != 0) {
-            require(newValidUntil > block.timestamp, "newValidUntil must be in the future");
+            require(newValidUntil > block.timestamp, "newValidUntil must be future");
         }
         require(newValidUntil >= validUntil[id], "Cannot shorten validity");
         validUntil[id] = newValidUntil;

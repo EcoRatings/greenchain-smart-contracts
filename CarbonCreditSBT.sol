@@ -109,6 +109,11 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         require(bytes(registrySerialNumber).length > 0, "Empty registry serial");
         require(royaltyBps <= _feeDenominator(), "royalty too high");
 
+        // Prevent minting immediately expired certificates
+        if (validUntil_ != 0) {
+            require(validUntil_ > block.timestamp, "validUntil must be in the future");
+        }
+
         bytes32 sk = _serialKey(registrySerialNumber);
         require(!registrySerialUsed[sk], "Registry serial already used");
         registrySerialUsed[sk] = true;
@@ -159,6 +164,9 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
     /// @notice Extend validity (cannot shorten). Governance-controlled.
     function extendValidity(uint256 tokenId, uint64 newValidUntil) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _requireOwned(tokenId);
+        if (newValidUntil != 0) {
+            require(newValidUntil > block.timestamp, "newValidUntil must be in the future");
+        }
         require(newValidUntil >= validUntil[tokenId], "Cannot shorten validity");
         validUntil[tokenId] = newValidUntil;
         emit ValiditySet(tokenId, newValidUntil);
