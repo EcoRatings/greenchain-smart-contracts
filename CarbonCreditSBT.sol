@@ -164,10 +164,19 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
     /// @notice Extend validity (cannot shorten). Governance-controlled.
     function extendValidity(uint256 tokenId, uint64 newValidUntil) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _requireOwned(tokenId);
+        // Allow setting to 0 to indicate "no expiry" per audit recommendation (ECA-02).
+        // Rules:
+        //  - If newValidUntil == 0 -> always allowed (removes expiry, increases flexibility)
+        //  - Else must be in the future
+        //  - Cannot reduce a non-zero validity to a smaller non-zero timestamp (monotonic unless clearing)
         if (newValidUntil != 0) {
-            require(newValidUntil > block.timestamp, "newValidUntil must be in the future");
+            require(newValidUntil > block.timestamp, "newValidUntil must be future");
+            require(newValidUntil >= validUntil[tokenId], "Cannot shorten validity");
+        } else {
+            // If clearing expiry (setting to 0) ensure we are not making an already expired token active retroactively.
+            // This is permitted; governance explicitly chooses to lift the expiry constraint.
+            // No additional checks required.
         }
-        require(newValidUntil >= validUntil[tokenId], "Cannot shorten validity");
         validUntil[tokenId] = newValidUntil;
         emit ValiditySet(tokenId, newValidUntil);
     }
