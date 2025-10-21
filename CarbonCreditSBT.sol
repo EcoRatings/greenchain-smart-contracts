@@ -225,12 +225,12 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
     }
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
-        _requireOwned(tokenId);
+        // Allow retrieval even after burn (retired). Use _minted flag instead of ownership check.
+        require(_minted[tokenId], "Nonexistent id");
         string memory custom = _tokenURIs[tokenId];
         if (bytes(custom).length > 0) return custom;
-        // optional fallback to baseURI + tokenId
         if (bytes(baseURI).length > 0) return string(abi.encodePacked(baseURI, tokenId.toString()));
-        return "";
+        return ""; // empty if nothing set
     }
 
     /// Convenience for indexers
@@ -240,7 +240,15 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         returns (uint16 _vintageYear, uint64 _validUntil, bytes32 _metadataHash, string memory _uri, bool _retired)
     {
         require(_minted[tokenId], "Nonexistent id");
-        return (vintageYear[tokenId], validUntil[tokenId], metadataHash[tokenId], tokenURI(tokenId), retired[tokenId]);
+        // Avoid calling tokenURI again; replicate logic for gas and clarity
+        string memory custom = _tokenURIs[tokenId];
+        string memory resolved = custom;
+        if (bytes(resolved).length == 0) {
+            if (bytes(baseURI).length > 0) {
+                resolved = string(abi.encodePacked(baseURI, tokenId.toString()));
+            }
+        }
+        return (vintageYear[tokenId], validUntil[tokenId], metadataHash[tokenId], resolved, retired[tokenId]);
     }
 
     // -------------------- Non-transferable enforcement --------------------
