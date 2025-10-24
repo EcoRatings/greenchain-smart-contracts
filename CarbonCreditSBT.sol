@@ -51,6 +51,13 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
     event ValiditySet(uint256 indexed id, uint64 validUntil);
     event CarbonRetired(address indexed from, uint256 indexed id);
 
+    // Multisig/timelock & migration events
+    event MultisigMigrationInitiated(address indexed newMultisig, uint256 timestamp);
+    event MultisigMigrationCompleted(address indexed oldAdmin, address indexed newMultisig);
+    event RolesBatchGranted(address indexed account, bytes32[] roles);
+    event DefaultAdminTransferInitiated(address indexed oldAdmin, address indexed newAdmin);
+    event DefaultAdminTransferCompleted(address indexed oldAdmin, address indexed newAdmin);
+
     // -------------------- Constructor --------------------
     constructor(
         string memory collectionName,
@@ -225,12 +232,12 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
     }
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
-        // Allow retrieval even after burn (retired). Use _minted flag instead of ownership check.
+        // Permit lookup after burn using _minted flag instead of _requireOwned.
         require(_minted[tokenId], "Nonexistent id");
         string memory custom = _tokenURIs[tokenId];
         if (bytes(custom).length > 0) return custom;
         if (bytes(baseURI).length > 0) return string(abi.encodePacked(baseURI, tokenId.toString()));
-        return ""; // empty if nothing set
+        return "";
     }
 
     /// Convenience for indexers
@@ -240,13 +247,10 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
         returns (uint16 _vintageYear, uint64 _validUntil, bytes32 _metadataHash, string memory _uri, bool _retired)
     {
         require(_minted[tokenId], "Nonexistent id");
-        // Avoid calling tokenURI again; replicate logic for gas and clarity
         string memory custom = _tokenURIs[tokenId];
         string memory resolved = custom;
-        if (bytes(resolved).length == 0) {
-            if (bytes(baseURI).length > 0) {
-                resolved = string(abi.encodePacked(baseURI, tokenId.toString()));
-            }
+        if (bytes(resolved).length == 0 && bytes(baseURI).length > 0) {
+            resolved = string(abi.encodePacked(baseURI, tokenId.toString()));
         }
         return (vintageYear[tokenId], validUntil[tokenId], metadataHash[tokenId], resolved, retired[tokenId]);
     }
@@ -282,5 +286,52 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
 
     function _baseURI() internal view override returns (string memory) {
         return baseURI;
+    }
+
+    // -------------------- Multisig / Timelock Governance Helpers --------------------
+    /// @notice Grant multiple roles to a multisig wallet in preparation for migration
+    /// @dev Only callable by DEFAULT_ADMIN_ROLE.
+    function batchGrantRolesToMultisig(address multisig, bytes32[] calldata roles)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(multisig != address(0), "Invalid multisig address");
+        require(multisig != msg.sender, "Multisig cannot be deployer EOA");
+        for (uint256 i = 0; i < roles.length; i++) {
+            grantRole(roles[i], multisig);
+        }
+        emit MultisigMigrationInitiated(multisig, block.timestamp);
+        emit RolesBatchGranted(multisig, roles);
+    }
+
+    /// @notice Revoke multiple roles from the deployer EOA after migration completes.
+    function batchRevokeRolesFromDeployer(address deployerEOA, bytes32[] calldata roles)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(deployerEOA != address(0), "Invalid deployer address");
+        for (uint256 i = 0; i < roles.length; i++) {
+            revokeRole(roles[i], deployerEOA);
+        }
+        emit MultisigMigrationCompleted(deployerEOA, msg.sender);
+    }
+
+    /// @notice Transfer DEFAULT_ADMIN to a timelock/multisig admin (grant then revoke old admin).
+    function transferDefaultAdminTo(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newAdmin != address(0), "Invalid new admin");
+        address oldAdmin = msg.sender;
+        emit DefaultAdminTransferInitiated(oldAdmin, newAdmin);
+        grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+        revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+        emit DefaultAdminTransferCompleted(oldAdmin, newAdmin);
+    }
+
+    /// @notice Helper to get all standard role identifiers for this contract (excluding DEFAULT_ADMIN_ROLE)
+    function getStandardRoles() external pure returns (bytes32[] memory) {
+        bytes32[] memory roles = new bytes32[](3);
+        roles[0] = MINTER_ROLE;
+        roles[1] = RETIRER_ROLE;
+        roles[2] = URI_MANAGER_ROLE;
+        return roles;
     }
 }

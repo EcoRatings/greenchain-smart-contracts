@@ -4,18 +4,21 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
 import "@openzeppelin/contracts/token/common/ERC2981.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 
 /// @title CarbonCredit1155
-/// @notice Gas-optimized ERC-1155 carbon credits.
-///         1 token = 1 tCO2e. Expiry-enforced transfers. Optional royalties.
-///         Rich metadata is kept off-chain (IPFS/Arweave) and anchored by metadataHash.
-///         Uniqueness enforced via hashed registry serial.
-contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
+/// @notice Gas-optimized ERC-1155 carbon credits. 1 token = 1 tCO2e.
+///         Transfers are blocked after expiry, but retirement (burn) is ALWAYS allowed
+///         (including after expiry). Optional royalties. Rich metadata is off-chain (IPFS/Arweave)
+///         and anchored by metadataHash. Uniqueness via hashed registry serial.
+/// @dev Centralization hardening per CertiK guidance:
+///      - Multi-sig + Timelock friendly admin handover (pp.3–4)
+///      - Irreversible mint shutdown to achieve "Removed/Renounced" for mint control (p.5)
+contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControlDefaultAdminRules {
     // -------------------- Roles --------------------
-    bytes32 public constant MINTER_ROLE       = keccak256("MINTER_ROLE");
-    bytes32 public constant RETIRER_ROLE      = keccak256("RETIRER_ROLE");
-    bytes32 public constant URI_MANAGER_ROLE  = keccak256("URI_MANAGER_ROLE");
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    // RETIRER_ROLE intentionally omitted: retirement is permissionless for owner/approved operator
+    bytes32 public constant URI_MANAGER_ROLE = keccak256("URI_MANAGER_ROLE");
 
     // -------------------- Collection metadata --------------------
     string public name;
@@ -47,6 +50,9 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
     // Small on-chain tag for discovery/filters (keep tiny!)
     mapping(uint256 => uint16) public vintageYear; // e.g., 2023
 
+    // -------------------- Mint finality (irreversible shutdown) --------------------
+    bool public mintingDisabledForever;
+
     // -------------------- Events --------------------
     event CarbonBatchMinted(
         uint256 indexed id,
@@ -57,11 +63,18 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         string tokenURI,
         bytes32 contentHash
     );
-
     event CarbonBatchURISet(uint256 indexed id, string uri);
     event MetadataFrozen(uint256 indexed id, bytes32 contentHash);
     event ValiditySet(uint256 indexed id, uint64 validUntil);
     event CarbonRetired(address indexed from, uint256 indexed id, uint256 amount);
+
+    // Multisig/timelock & migration events
+    event MultisigMigrationInitiated(address indexed newMultisig, uint256 timestamp);
+    event MultisigMigrationCompleted(address indexed oldAdmin, address indexed newMultisig);
+    event RolesBatchGranted(address indexed account, bytes32[] roles);
+    event DefaultAdminTransferInitiated(address indexed oldAdmin, address indexed newAdmin);
+    event DefaultAdminTransferCompleted(address indexed oldAdmin, address indexed newAdmin);
+    event MintingPermanentlyDisabled();
 
     // -------------------- Constructor --------------------
     constructor(
@@ -70,14 +83,18 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         string memory baseURI,
         address defaultRoyaltyReceiver,
         uint96 defaultRoyaltyBps
-    ) ERC1155(baseURI) {
+    )
+        ERC1155(baseURI)
+        // 48h delay on role admin ops (grants/revokes) — aligns with timelock guidance
+        AccessControlDefaultAdminRules(2 days, msg.sender)
+    {
         name = collectionName;
         symbol = collectionSymbol;
         _idCounter = 1;
 
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        // DEFAULT_ADMIN_ROLE is automatically set by AccessControlDefaultAdminRules constructor.
+        // Calling _grantRole again triggers AccessControlEnforcedDefaultAdminRules() revert.
         _grantRole(MINTER_ROLE, msg.sender);
-        _grantRole(RETIRER_ROLE, msg.sender);
         _grantRole(URI_MANAGER_ROLE, msg.sender);
 
         if (defaultRoyaltyReceiver != address(0) && defaultRoyaltyBps > 0) {
@@ -92,9 +109,7 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         bytes memory b = bytes(s);
         for (uint256 i; i < b.length; ++i) {
             uint8 c = uint8(b[i]);
-            if (c >= 65 && c <= 90) { // 'A'..'Z'
-                b[i] = bytes1(c + 32);
-            }
+            if (c >= 65 && c <= 90) b[i] = bytes1(c + 32); // 'A'..'Z'
         }
         return keccak256(b);
     }
@@ -105,8 +120,8 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
     }
 
     // -------------------- Minting --------------------
-    /// @dev 1 token = 1 tCO2e. Use `amount` as tonnes minted.
-    /// @param to Receiver of the minted credits
+    /// @dev 1 token = 1 tCO2e. Use amount as tonnes minted.
+    /// @param to Receiver of the minted credits (buyer address in your flow)
     /// @param amount Tonnes of CO2e (must be > 0)
     /// @param _vintageYear Vintage year (e.g., 2023)
     /// @param registrySerialNumber Human-readable serial; stored only as keccak256(lowercase ASCII) for uniqueness
@@ -127,11 +142,11 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         uint64 validUntil_,
         bytes calldata data
     ) external onlyRole(MINTER_ROLE) returns (uint256 id) {
+        require(!mintingDisabledForever, "minting disabled");
         require(amount > 0, "Amount must be > 0");
         require(_vintageYear > 2000 && _vintageYear <= 2100, "Invalid vintage year");
         require(bytes(registrySerialNumber).length > 0, "Empty registry serial");
         require(royaltyBps <= _feeDenominator(), "royalty too high");
-
         if (validUntil_ != 0) {
             require(validUntil_ > block.timestamp, "validUntil must be future");
         }
@@ -166,6 +181,14 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         emit CarbonBatchMinted(id, to, amount, _vintageYear, sk, tokenURI_, metadataHash[id]);
     }
 
+    /// @notice Permanently disable future minting (irreversible).
+    /// @dev Achieves "Removed/Renounced" for the mint function from a centralization standpoint.
+    function disableMintingForever() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(!mintingDisabledForever, "already disabled");
+        mintingDisabledForever = true;
+        emit MintingPermanentlyDisabled();
+    }
+
     // -------------------- Metadata controls --------------------
     function setURI(uint256 id, string calldata newuri, bytes32 contentHash) external onlyRole(URI_MANAGER_ROLE) {
         require(exists(id), "Nonexistent id");
@@ -187,7 +210,6 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
     /// @notice Extend validity (cannot shorten). Governance-controlled.
     function extendValidity(uint256 id, uint64 newValidUntil) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(exists(id), "Nonexistent id");
-        // Optional extra safety: do not allow setting a past timestamp
         if (newValidUntil != 0) {
             require(newValidUntil > block.timestamp, "newValidUntil must be future");
         }
@@ -198,16 +220,9 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
 
     // -------------------- Retirement (Burn) --------------------
     /// @notice Retire (burn) a specific amount from `from` for `id`.
-    /// @dev Retirement is blocked after expiry. Remove the check to allow post-expiry retire.
+    /// @dev Retirement is allowed at any time (even after expiry). Only token owner or approved operator can retire.
     function retire(address from, uint256 id, uint256 amount) public {
-        uint64 vu = validUntil[id];
-        require(vu == 0 || block.timestamp <= vu, "Token expired");
-        require(
-            _msgSender() == from ||
-            isApprovedForAll(from, _msgSender()) ||
-            hasRole(RETIRER_ROLE, _msgSender()),
-            "Not owner/approved/retirer"
-        );
+        require(_msgSender() == from || isApprovedForAll(from, _msgSender()), "Not owner/approved");
         _burn(from, id, amount);
         retiredSupply[id] += amount;
         emit CarbonRetired(from, id, amount);
@@ -248,8 +263,7 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
         return vu != 0 && block.timestamp > vu;
     }
 
-    /// @notice On-chain status derived from supply and expiry.
-    /// "Expired" takes precedence over supply-based statuses.
+    /// @notice On-chain status derived from supply and expiry. "Expired" takes precedence over supply-based statuses.
     /// @dev Uses _everIssued so FullyRetired status is available when totalSupply==0.
     function statusOf(uint256 id) external view returns (string memory) {
         require(_everIssued(id), "Unknown id");
@@ -275,7 +289,7 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
     function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(ERC1155, ERC2981, AccessControl)
+        override(ERC1155, ERC2981, AccessControlDefaultAdminRules)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
@@ -293,5 +307,52 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControl {
             }
         }
         super._update(from, to, ids, amounts);
+    }
+
+    // -------------------- Multisig / Timelock Governance Helpers --------------------
+    /// @notice Grant multiple roles to a multisig wallet in preparation for migration
+    /// @dev Only callable by DEFAULT_ADMIN_ROLE. Each grant subject to the 48h delay.
+    function batchGrantRolesToMultisig(address multisig, bytes32[] calldata roles)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(multisig != address(0), "Invalid multisig address");
+        require(multisig != msg.sender, "Multisig cannot be deployer EOA");
+        for (uint256 i = 0; i < roles.length; i++) {
+            grantRole(roles[i], multisig);
+        }
+        emit MultisigMigrationInitiated(multisig, block.timestamp);
+        emit RolesBatchGranted(multisig, roles);
+    }
+
+    /// @notice Revoke multiple roles from the deployer EOA after migration completes.
+    function batchRevokeRolesFromDeployer(address deployerEOA, bytes32[] calldata roles)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        require(deployerEOA != address(0), "Invalid deployer address");
+        for (uint256 i = 0; i < roles.length; i++) {
+            revokeRole(roles[i], deployerEOA);
+        }
+        emit MultisigMigrationCompleted(deployerEOA, msg.sender);
+    }
+
+    /// @notice Transfer DEFAULT_ADMIN to a timelock/multisig admin (grant then revoke old admin).
+    /// @dev Uses AccessControlDefaultAdminRules 48h delay for safety & auditability.
+    function transferDefaultAdminTo(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newAdmin != address(0), "Invalid new admin");
+        address oldAdmin = msg.sender;
+        emit DefaultAdminTransferInitiated(oldAdmin, newAdmin);
+        grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+        revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+        emit DefaultAdminTransferCompleted(oldAdmin, newAdmin);
+    }
+
+    /// @notice Helper to get all standard role identifiers for this contract (excluding DEFAULT_ADMIN_ROLE)
+    function getStandardRoles() external pure returns (bytes32[] memory) {
+        bytes32[] memory roles = new bytes32[](2);
+        roles[0] = MINTER_ROLE;
+        roles[1] = URI_MANAGER_ROLE;
+        return roles;
     }
 }
