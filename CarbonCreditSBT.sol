@@ -319,6 +319,7 @@ contract CarbonCreditSBT is ERC721, ERC2981, AccessControl {
     /// @notice Transfer DEFAULT_ADMIN to a timelock/multisig admin (grant then revoke old admin).
     function transferDefaultAdminTo(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newAdmin != address(0), "Invalid new admin");
+        require(newAdmin != msg.sender, "Cannot transfer to same admin");
         address oldAdmin = msg.sender;
         emit DefaultAdminTransferInitiated(oldAdmin, newAdmin);
         grantRole(DEFAULT_ADMIN_ROLE, newAdmin);

@@ -337,15 +337,22 @@ contract CarbonCredit1155 is ERC1155, ERC1155Supply, ERC2981, AccessControlDefau
         emit MultisigMigrationCompleted(deployerEOA, msg.sender);
     }
 
-    /// @notice Transfer DEFAULT_ADMIN to a timelock/multisig admin (grant then revoke old admin).
-    /// @dev Uses AccessControlDefaultAdminRules 48h delay for safety & auditability.
+    /// @notice Transfer DEFAULT_ADMIN to a timelock/multisig admin using proper 2-step flow.
+    /// @dev Uses AccessControlDefaultAdminRules beginDefaultAdminTransfer/acceptDefaultAdminTransfer.
     function transferDefaultAdminTo(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newAdmin != address(0), "Invalid new admin");
         address oldAdmin = msg.sender;
         emit DefaultAdminTransferInitiated(oldAdmin, newAdmin);
-        grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
-        revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
-        emit DefaultAdminTransferCompleted(oldAdmin, newAdmin);
+        beginDefaultAdminTransfer(newAdmin);
+        // Note: newAdmin must call acceptDefaultAdminTransfer() after delay period
+    }
+
+    /// @notice Helper function for newAdmin to accept the DEFAULT_ADMIN_ROLE transfer.
+    /// @dev Must be called by the new admin after the delay period.
+    function acceptDefaultAdminTransfer() public override {
+        address oldAdmin = defaultAdmin();
+        super.acceptDefaultAdminTransfer();
+        emit DefaultAdminTransferCompleted(oldAdmin, msg.sender);
     }
 
     /// @notice Helper to get all standard role identifiers for this contract (excluding DEFAULT_ADMIN_ROLE)
